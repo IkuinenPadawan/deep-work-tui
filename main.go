@@ -23,6 +23,7 @@ type model struct {
 	showInput   bool
 	focused     int
 	err         error
+	lastKey     string
 }
 
 func parseTime(t string) time.Time {
@@ -69,7 +70,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.KeyMsg:
+		if msg.String() == "d" && m.lastKey == "d" {
+			indexToRemove := m.cursor
+			m.timeblocks = append(m.timeblocks[:indexToRemove], m.timeblocks[indexToRemove+1:]...)
+			m.lastKey = ""
+			return m, nil
+		}
 
+		// Store the current key as the last key
+		m.lastKey = msg.String()
 		switch msg.String() {
 
 		case "ctrl+c":
@@ -171,15 +180,15 @@ func (m model) View() string {
 	if m.showInput {
 		fmt.Fprintln(&b, "\nAdd a time block:")
 		for i, input := range m.inputFields {
-			indicator := " " // Default no indicator
+			indicator := " "
 			if i == m.focused {
-				indicator = ">" // Highlight focused input
+				indicator = ">"
 			}
 			fmt.Fprintf(&b, "  %s %s\n", indicator, input.View())
 		}
 		b.WriteString("\n [ tab: Cycle Focus | enter: Save | q: close ]")
 	} else {
-		b.WriteString("\n [ a: Add new timeblock | j: Down | k: Up | enter/space: Toggle select | q: Quit ]")
+		b.WriteString("\n [ a: Add new time block | dd: Delete selected time block | j: Down | k: Up | enter/space: Toggle select | q: Quit ]")
 	}
 	return b.String()
 }
