@@ -5,6 +5,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -149,6 +150,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.inputFields[m.focused] = updatedInput
 		return m, cmd
 	}
+
+	sort.Slice(m.timeblocks, func(i, j int) bool {
+		return m.timeblocks[i].starttime.Before(m.timeblocks[j].starttime)
+	})
 
 	return m, nil
 }
