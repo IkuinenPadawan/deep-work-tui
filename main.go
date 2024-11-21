@@ -70,6 +70,30 @@ func (m model) Init() tea.Cmd {
 	return textinput.Blink
 }
 
+func (m *model) enterAddMode() {
+	m.showInput = true
+	m.focused = 0
+	for i := range m.inputFields {
+		if i == m.focused {
+			m.inputFields[i].Focus()
+		} else {
+			m.inputFields[i].Blur()
+		}
+	}
+}
+
+func (m *model) saveAdd() {
+	name := m.inputFields[0].Value()
+	start := m.inputFields[1].Value()
+	end := m.inputFields[2].Value()
+
+	if name != "" && isValidTime(start) && isValidTime(end) {
+		m.timeblocks = append(m.timeblocks, Timeblock{task: name, starttime: parseTime(start), endtime: parseTime(end)})
+		m.showInput = false
+		m.clearInputFields()
+	}
+}
+
 func (m *model) enterEditMode() {
 	if len(m.timeblocks) == 0 {
 		return
@@ -96,15 +120,16 @@ func (m *model) saveEdit() {
 	m.editing = false
 	m.editIndex = -1
 
-	for i := range m.inputFields {
-		m.inputFields[i].SetValue("")
-	}
+	m.clearInputFields()
 }
 
 func (m *model) cancelEdit() {
 	m.editing = false
 	m.editIndex = -1
+	m.clearInputFields()
+}
 
+func (m *model) clearInputFields() {
 	for i := range m.inputFields {
 		m.inputFields[i].SetValue("")
 	}
@@ -151,37 +176,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "a":
-			m.showInput = true
-			m.focused = 0
-			for i := range m.inputFields {
-				if i == m.focused {
-					m.inputFields[i].Focus()
-				} else {
-					m.inputFields[i].Blur()
-				}
-			}
+			m.enterAddMode()
 			return m, nil
+
 		case "e":
 			m.enterEditMode()
+			return m, nil
 
 		case "enter":
 			if m.showInput && m.editing == false {
-				name := m.inputFields[0].Value()
-				start := m.inputFields[1].Value()
-				end := m.inputFields[2].Value()
-
-				if name != "" && isValidTime(start) && isValidTime(end) {
-					m.timeblocks = append(m.timeblocks, Timeblock{task: name, starttime: parseTime(start), endtime: parseTime(end)})
-					m.showInput = false
-					for i := range m.inputFields {
-						m.inputFields[i].SetValue("")
-					}
-				} else {
-					m.err = fmt.Errorf("invalid input")
-				}
+				m.saveAdd()
 				return m, nil
 			} else if m.editing == true {
 				m.saveEdit()
+				return m, nil
+			} else {
+				m.err = fmt.Errorf("invalid input")
 			}
 
 		case "tab":
