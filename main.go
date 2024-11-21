@@ -22,6 +22,8 @@ type model struct {
 	selected    map[int]struct{}
 	inputFields []textinput.Model
 	showInput   bool
+	editing     bool
+	editIndex   int
 	focused     int
 	err         error
 	lastKey     string
@@ -58,6 +60,7 @@ func initialModel() model {
 		},
 		selected:    make(map[int]struct{}),
 		showInput:   false,
+		editing:     false,
 		inputFields: []textinput.Model{taskNameInput, startTimeInput, endTimeInput},
 		focused:     0,
 	}
@@ -67,11 +70,51 @@ func (m model) Init() tea.Cmd {
 	return textinput.Blink
 }
 
+func (m *model) enterEditMode() {
+	if len(m.timeblocks) == 0 {
+		return
+	}
+
+	m.editing = true
+	m.editIndex = m.cursor
+
+	timeblock := m.timeblocks[m.editIndex]
+	m.inputFields[0].SetValue(timeblock.task)
+	m.inputFields[1].SetValue(timeblock.starttime.Format("15:04"))
+	m.inputFields[2].SetValue(timeblock.endtime.Format("15:04"))
+}
+
+func (m *model) saveEdit() {
+	if !m.editing || m.editIndex < 0 || m.editIndex >= len(m.timeblocks) {
+		return
+	}
+
+	m.timeblocks[m.editIndex].task = m.inputFields[0].Value()
+	m.timeblocks[m.editIndex].starttime, _ = time.Parse("15:04", m.inputFields[1].Value())
+	m.timeblocks[m.editIndex].endtime, _ = time.Parse("15:04", m.inputFields[2].Value())
+
+	m.editing = false
+	m.editIndex = -1
+
+	for i := range m.inputFields {
+		m.inputFields[i].SetValue("")
+	}
+}
+
+func (m *model) cancelEdit() {
+	m.editing = false
+	m.editIndex = -1
+
+	for i := range m.inputFields {
+		m.inputFields[i].SetValue("")
+	}
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.KeyMsg:
-		if msg.String() == "d" && m.lastKey == "d" {
+		if msg.String() == "d" && m.lastKey == "d" && !m.editing && !m.showInput {
 			indexToRemove := m.cursor
 			m.timeblocks = append(m.timeblocks[:indexToRemove], m.timeblocks[indexToRemove+1:]...)
 			m.lastKey = ""
@@ -90,6 +133,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showInput = false
 			} else {
 				return m, tea.Quit
+			}
+
+		case "esc":
+			if m.editing {
+				m.cancelEdit()
 			}
 
 		case "up", "k":
@@ -113,9 +161,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
+		case "e":
+			m.enterEditMode()
 
 		case "enter":
-			if m.showInput {
+			if m.showInput && m.editing == false {
 				name := m.inputFields[0].Value()
 				start := m.inputFields[1].Value()
 				end := m.inputFields[2].Value()
@@ -130,7 +180,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.err = fmt.Errorf("invalid input")
 				}
 				return m, nil
+			} else if m.editing == true {
+				m.saveEdit()
 			}
+
 		case "tab":
 			m.focused = (m.focused + 1) % len(m.inputFields)
 
@@ -149,6 +202,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		updatedInput, cmd := m.inputFields[m.focused].Update(msg)
 		m.inputFields[m.focused] = updatedInput
 		return m, cmd
+	}
+
+	if m.editing {
+		for i := range m.inputFields {
+			var cmd tea.Cmd
+			m.inputFields[i], cmd = m.inputFields[i].Update(msg)
+			_ = cmd
+		}
 	}
 
 	sort.Slice(m.timeblocks, func(i, j int) bool {
@@ -182,6 +243,18 @@ func (m model) View() string {
 		b.WriteString(fmt.Sprintf("%s [%s] %s\n", cursor, checked, blockText))
 	}
 
+	if m.editing {
+		fmt.Fprintln(&b, "\nEdit a time block:")
+		for i, input := range m.inputFields {
+			indicator := " "
+			if i == m.focused {
+				indicator = ">"
+			}
+			fmt.Fprintf(&b, "  %s %s\n", indicator, input.View())
+		}
+		b.WriteString("\n [ tab: Cycle Focus | enter: Save | esc: Cancel ]")
+	}
+
 	if m.showInput {
 		fmt.Fprintln(&b, "\nAdd a time block:")
 		for i, input := range m.inputFields {
@@ -192,8 +265,10 @@ func (m model) View() string {
 			fmt.Fprintf(&b, "  %s %s\n", indicator, input.View())
 		}
 		b.WriteString("\n [ tab: Cycle Focus | enter: Save | q: close ]")
-	} else {
-		b.WriteString("\n [ a: Add new time block | dd: Delete selected time block | j: Down | k: Up | enter/space: Toggle select | q: Quit ]")
+	}
+
+	if !m.showInput && !m.editing {
+		b.WriteString("\n [ a: Add new time block | e: Edit selected time block | dd: Delete selected time block | j: Down | k: Up | enter/space: Toggle select | q: Quit ]")
 	}
 	return b.String()
 }
