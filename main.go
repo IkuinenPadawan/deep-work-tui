@@ -20,16 +20,18 @@ type Timeblock struct {
 }
 
 type model struct {
-	timeblocks  []Timeblock
-	cursor      int
-	selected    map[int]struct{}
-	inputFields []textinput.Model
-	showInput   bool
-	editing     bool
-	editIndex   int
-	focused     int
-	err         error
-	lastKey     string
+	timeblocks    []Timeblock
+	cursor        int
+	selected      map[int]struct{}
+	inputFields   []textinput.Model
+	shutdownInput []textinput.Model
+	showInput     bool
+	editing       bool
+	shutdown      bool
+	editIndex     int
+	focused       int
+	err           error
+	lastKey       string
 }
 
 func initialModel() model {
@@ -44,6 +46,11 @@ func initialModel() model {
 	endTimeInput := textinput.New()
 	endTimeInput.Placeholder = "End Time (HH:mm)"
 	endTimeInput.CharLimit = 5
+
+	shutdownInput := textinput.New()
+	shutdownInput.Placeholder = "SHUTDOWN COMPLETE"
+	shutdownInput.CharLimit = 17
+
 	return model{
 		timeblocks: []Timeblock{
 			{"Deep Work", utils.ParseTime("07:00"), utils.ParseTime("10:00")},
@@ -52,11 +59,13 @@ func initialModel() model {
 			{"Meeting", utils.ParseTime("12:00"), utils.ParseTime("14:00")},
 			{"Deep Work", utils.ParseTime("14:00"), utils.ParseTime("16:00")},
 		},
-		selected:    make(map[int]struct{}),
-		showInput:   false,
-		editing:     false,
-		inputFields: []textinput.Model{taskNameInput, startTimeInput, endTimeInput},
-		focused:     0,
+		selected:      make(map[int]struct{}),
+		showInput:     false,
+		editing:       false,
+		inputFields:   []textinput.Model{taskNameInput, startTimeInput, endTimeInput},
+		focused:       0,
+		shutdown:      false,
+		shutdownInput: []textinput.Model{shutdownInput},
 	}
 }
 
@@ -123,6 +132,17 @@ func (m *model) cancelEdit() {
 	m.clearInputFields()
 }
 
+func (m *model) cancelShutdown() {
+	m.shutdown = false
+	m.shutdownInput[0].SetValue("")
+}
+
+func (m *model) enterShutdownMode() {
+	m.shutdown = true
+	m.shutdownInput[0].SetValue("")
+	m.shutdownInput[0].Focus()
+}
+
 func (m *model) clearInputFields() {
 	for i := range m.inputFields {
 		m.inputFields[i].SetValue("")
@@ -157,6 +177,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			if m.editing {
 				m.cancelEdit()
+			} else if m.shutdown {
+				m.cancelShutdown()
 			}
 
 		case "up", "k":
@@ -177,6 +199,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.enterEditMode()
 			return m, nil
 
+		case "s":
+			m.enterShutdownMode()
+			return m, nil
+
 		case "enter":
 			if m.showInput && m.editing == false {
 				m.saveAdd()
@@ -184,6 +210,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.editing == true {
 				m.saveEdit()
 				return m, nil
+			} else if m.shutdown == true {
+				return m, tea.Quit
 			} else {
 				m.err = fmt.Errorf("invalid input")
 			}
@@ -205,6 +233,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.showInput {
 		updatedInput, cmd := m.inputFields[m.focused].Update(msg)
 		m.inputFields[m.focused] = updatedInput
+		return m, cmd
+	}
+
+	if m.shutdown {
+		updatedInput, cmd := m.shutdownInput[0].Update(msg)
+		m.shutdownInput[0] = updatedInput
 		return m, cmd
 	}
 
@@ -279,9 +313,16 @@ func (m model) View() string {
 		b.WriteString("\n [ tab: Cycle Focus | enter: Save | q: close ]")
 	}
 
-	if !m.showInput && !m.editing {
+	if !m.showInput && !m.editing && !m.shutdown {
 		b.WriteString("\n [ a: Add new time block | e: Edit selected time block | dd: Delete selected time block | j: Down | k: Up | enter/space: Toggle select | q: Quit ]")
 	}
+
+	if m.shutdown {
+		fmt.Fprintln(&b, "\nEnter SHUTDOWN COMPLETE to end the day:")
+		fmt.Fprintln(&b, m.shutdownInput[0].View())
+		b.WriteString("\n enter: SHUTDOWN | esc: Cancel ]")
+	}
+
 	return b.String()
 }
 
