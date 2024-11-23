@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"os"
 	"sort"
 	"strings"
@@ -27,6 +28,58 @@ type model struct {
 	focused     int
 	err         error
 	lastKey     string
+}
+
+var (
+	blockStyle        = lipgloss.NewStyle().PaddingLeft(2)
+	timeStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	taskStyle         = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("241"))
+	freeTimeStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
+	selectedTimeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
+)
+
+func getSeamlessBlockStyle(isFirst, isLast bool) lipgloss.Style {
+	var border lipgloss.Border
+	if isFirst {
+		border = lipgloss.Border{
+			Top:         "─",
+			Bottom:      " ",
+			Left:        "│",
+			Right:       "│",
+			TopLeft:     " ",
+			TopRight:    " ",
+			BottomLeft:  "│",
+			BottomRight: "│",
+		}
+	} else if isLast {
+		border = lipgloss.Border{
+			Top:         "─",
+			Bottom:      "─",
+			Left:        "│",
+			Right:       "│",
+			TopLeft:     "│",
+			TopRight:    "│",
+			BottomLeft:  " ",
+			BottomRight: " ",
+		}
+	} else {
+		border = lipgloss.Border{
+			Top:         "─",
+			Bottom:      " ",
+			Left:        "│",
+			Right:       "│",
+			TopLeft:     "│",
+			TopRight:    "│",
+			BottomLeft:  "│",
+			BottomRight: "│",
+		}
+	}
+
+	baseStyle := lipgloss.NewStyle().
+		BorderStyle(border).
+		Padding(0, 1)
+
+	return baseStyle.BorderForeground(lipgloss.Color("#AAAAAA"))
 }
 
 func parseTime(t string) time.Time {
@@ -54,7 +107,8 @@ func initialModel() model {
 	return model{
 		timeblocks: []Timeblock{
 			{"Deep Work", parseTime("07:00"), parseTime("10:00")},
-			{"Other Work", parseTime("10:00"), parseTime("12:00")},
+			{"Email", parseTime("10:00"), parseTime("10:30")},
+			{"Other Work", parseTime("10:30"), parseTime("12:00")},
 			{"Meeting", parseTime("12:00"), parseTime("14:00")},
 			{"Deep Work", parseTime("14:00"), parseTime("16:00")},
 		},
@@ -233,24 +287,32 @@ func (m model) View() string {
 	var b strings.Builder
 
 	for i, timeblock := range m.timeblocks {
+		duration := timeblock.endtime.Sub(timeblock.starttime).Minutes()
+		lines := int(duration / 30)
+
+		var styleToUse lipgloss.Style
+		if m.cursor == i {
+			styleToUse = selectedTimeStyle
+		} else {
+			styleToUse = timeStyle
+		}
+
 		var blockView *strings.Builder = &strings.Builder{}
-		blockView.WriteString(fmt.Sprintf("%s-%s",
-			timeblock.starttime.Format("15:04"), timeblock.endtime.Format("15:04")))
-		blockView.WriteString(" ")
-		blockView.WriteString(timeblock.task)
+		blockView.WriteString(styleToUse.Render(fmt.Sprintf("%s-%s",
+			timeblock.starttime.Format("15:04"), timeblock.endtime.Format("15:04"))))
+		blockView.WriteString("\n")
+		blockView.WriteString(styleToUse.Render(timeblock.task))
 		blockText := blockView.String()
 
-		cursor := " "
-		if m.cursor == i {
-			cursor = ">"
+		for j := 0; j < lines-1; j++ {
+			blockText += "\n"
 		}
 
-		checked := " "
-		if _, ok := m.selected[i]; ok {
-			checked = "x"
-		}
+		isFirst := i == 0
+		isLast := i == len(m.timeblocks)-1
 
-		b.WriteString(fmt.Sprintf("%s [%s] %s\n", cursor, checked, blockText))
+		style := getSeamlessBlockStyle(isFirst, isLast)
+		b.WriteString(fmt.Sprintf("%s \n", style.Render(blockText)))
 	}
 
 	if m.editing {
