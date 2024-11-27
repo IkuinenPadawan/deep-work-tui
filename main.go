@@ -25,7 +25,7 @@ type model struct {
 	selected      map[int]struct{}
 	inputFields   []textinput.Model
 	shutdownInput []textinput.Model
-	showInput     bool
+	adding        bool
 	editing       bool
 	shutdown      bool
 	editIndex     int
@@ -60,7 +60,7 @@ func initialModel() model {
 			{"Deep Work", utils.ParseTime("14:00"), utils.ParseTime("16:00")},
 		},
 		selected:      make(map[int]struct{}),
-		showInput:     false,
+		adding:        false,
 		editing:       false,
 		inputFields:   []textinput.Model{taskNameInput, startTimeInput, endTimeInput},
 		focused:       0,
@@ -74,7 +74,7 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m *model) enterAddMode() {
-	m.showInput = true
+	m.adding = true
 	m.focused = 0
 	for i := range m.inputFields {
 		if i == m.focused {
@@ -92,9 +92,14 @@ func (m *model) saveAdd() {
 
 	if name != "" && utils.IsValidTime(start) && utils.IsValidTime(end) {
 		m.timeblocks = append(m.timeblocks, Timeblock{task: name, starttime: utils.ParseTime(start), endtime: utils.ParseTime(end)})
-		m.showInput = false
+		m.adding = false
 		m.clearInputFields()
 	}
+}
+
+func (m *model) cancelAdd() {
+	m.adding = false
+	m.clearInputFields()
 }
 
 func (m *model) enterEditMode() {
@@ -153,7 +158,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.KeyMsg:
-		if msg.String() == "d" && m.lastKey == "d" && !m.editing && !m.showInput {
+		if msg.String() == "d" && m.lastKey == "d" && !m.editing && !m.adding {
 			indexToRemove := m.cursor
 			m.timeblocks = append(m.timeblocks[:indexToRemove], m.timeblocks[indexToRemove+1:]...)
 			m.lastKey = ""
@@ -168,8 +173,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "q":
-			if m.showInput {
-				m.showInput = false
+			if m.adding {
+				m.cancelAdd()
 			} else {
 				return m, tea.Quit
 			}
@@ -179,32 +184,40 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cancelEdit()
 			} else if m.shutdown {
 				m.cancelShutdown()
+			} else if m.adding {
+				m.cancelAdd()
 			}
 
 		case "up", "k":
-			if m.cursor > 0 {
+			if m.cursor > 0 && !m.editing && !m.adding && !m.shutdown {
 				m.cursor--
 			}
 
 		case "down", "j":
-			if m.cursor < len(m.timeblocks)-1 {
+			if m.cursor < len(m.timeblocks)-1 && !m.editing && !m.adding && !m.shutdown {
 				m.cursor++
 			}
 
 		case "a":
-			m.enterAddMode()
-			return m, nil
+			if !m.editing && !m.shutdown && !m.adding {
+				m.enterAddMode()
+				return m, nil
+			}
 
 		case "e":
-			m.enterEditMode()
-			return m, nil
+			if !m.adding && !m.shutdown && !m.editing {
+				m.enterEditMode()
+				return m, nil
+			}
 
 		case "s":
-			m.enterShutdownMode()
-			return m, nil
+			if !m.adding && !m.editing && !m.shutdown {
+				m.enterShutdownMode()
+				return m, nil
+			}
 
 		case "enter":
-			if m.showInput && m.editing == false {
+			if m.adding && m.editing == false {
 				m.saveAdd()
 				return m, nil
 			} else if m.editing == true {
@@ -230,7 +243,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	if m.showInput {
+	if m.adding {
 		updatedInput, cmd := m.inputFields[m.focused].Update(msg)
 		m.inputFields[m.focused] = updatedInput
 		return m, cmd
@@ -301,7 +314,7 @@ func (m model) View() string {
 		b.WriteString("\n [ tab: Cycle Focus | enter: Save | esc: Cancel ]")
 	}
 
-	if m.showInput {
+	if m.adding {
 		fmt.Fprintln(&b, "\nAdd a time block:")
 		for i, input := range m.inputFields {
 			indicator := " "
@@ -310,11 +323,11 @@ func (m model) View() string {
 			}
 			fmt.Fprintf(&b, "  %s %s\n", indicator, input.View())
 		}
-		b.WriteString("\n [ tab: Cycle Focus | enter: Save | q: close ]")
+		b.WriteString("\n [ tab: Cycle Focus | enter: Save | esc: Cancel ]")
 	}
 
-	if !m.showInput && !m.editing && !m.shutdown {
-		b.WriteString("\n [ a: Add new time block | e: Edit selected time block | dd: Delete selected time block | j: Down | k: Up | enter/space: Toggle select | q: Quit ]")
+	if !m.adding && !m.editing && !m.shutdown {
+		b.WriteString("\n [ a: Add new time block | e: Edit time block | dd: Delete time block | j: Down | k: Up | s: shutdown ]")
 	}
 
 	if m.shutdown {
