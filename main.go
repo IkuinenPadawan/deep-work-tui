@@ -20,18 +20,19 @@ type Timeblock struct {
 }
 
 type model struct {
-	timeblocks    []Timeblock
-	cursor        int
-	selected      map[int]struct{}
-	inputFields   []textinput.Model
-	shutdownInput []textinput.Model
-	adding        bool
-	editing       bool
-	shutdown      bool
-	editIndex     int
-	focused       int
-	err           error
-	lastKey       string
+	timeblocks     []Timeblock
+	cursor         int
+	selected       map[int]struct{}
+	inputFields    []textinput.Model
+	shutdownInput  []textinput.Model
+	adding         bool
+	editing        bool
+	shutdown       bool
+	editIndex      int
+	focused        int
+	err            error
+	lastKey        string
+	highlightIndex int
 }
 
 func initialModel() model {
@@ -70,7 +71,12 @@ func initialModel() model {
 }
 
 func (m model) Init() tea.Cmd {
-	return textinput.Blink
+	return tea.Batch(textinput.Blink, tick())
+}
+func tick() tea.Cmd {
+	return tea.Tick(time.Minute, func(t time.Time) tea.Msg {
+		return t
+	})
 }
 
 func (m *model) enterAddMode() {
@@ -156,17 +162,19 @@ func (m *model) clearInputFields() {
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case time.Time:
+		now := msg
+		m.highlightIndex = -1
+
+		for i, tb := range m.timeblocks {
+			if now.After(tb.starttime) && now.Before(tb.endtime) {
+				m.highlightIndex = i
+				break
+			}
+		}
+		return m, tick()
 
 	case tea.KeyMsg:
-		if msg.String() == "d" && m.lastKey == "d" && !m.editing && !m.adding {
-			indexToRemove := m.cursor
-			m.timeblocks = append(m.timeblocks[:indexToRemove], m.timeblocks[indexToRemove+1:]...)
-			m.lastKey = ""
-			return m, nil
-		}
-
-		// Store the current key as the last key
-		m.lastKey = msg.String()
 		switch msg.String() {
 
 		case "ctrl+c":
@@ -215,6 +223,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.enterShutdownMode()
 				return m, nil
 			}
+
+		case "d":
+			if m.lastKey == "d" && !m.editing && !m.adding {
+				// Remove the timeblock at the current cursor position
+				if m.cursor >= 0 && m.cursor < len(m.timeblocks) {
+					indexToRemove := m.cursor
+					m.timeblocks = append(m.timeblocks[:indexToRemove], m.timeblocks[indexToRemove+1:]...)
+
+					// Adjust cursor if necessary
+					if m.cursor >= len(m.timeblocks) {
+						m.cursor = len(m.timeblocks) - 1
+					}
+				}
+				m.lastKey = "" // Reset the last key
+				return m, nil
+			}
+			m.lastKey = "d" // Store this key as the last pressed
 
 		case "enter":
 			if m.adding && m.editing == false {
@@ -280,10 +305,11 @@ func (m model) View() string {
 		var styleToUse lipgloss.Style
 		if m.cursor == i {
 			styleToUse = styles.SelectedTimeStyle
+		} else if m.highlightIndex == i {
+			styleToUse = styles.HighlightStyle
 		} else {
 			styleToUse = styles.TimeStyle
 		}
-
 		var blockView *strings.Builder = &strings.Builder{}
 		blockView.WriteString(styleToUse.Render(fmt.Sprintf("%s-%s",
 			timeblock.starttime.Format("15:04"), timeblock.endtime.Format("15:04"))))
