@@ -1,6 +1,8 @@
 package main
 
 import (
+	"deep-work-tui/cmd"
+	"deep-work-tui/models"
 	"deep-work-tui/styles"
 	"deep-work-tui/utils"
 	"fmt"
@@ -13,14 +15,8 @@ import (
 	"time"
 )
 
-type Timeblock struct {
-	task      string
-	starttime time.Time
-	endtime   time.Time
-}
-
 type model struct {
-	timeblocks     []Timeblock
+	timeblocks     []models.Timeblock
 	cursor         int
 	selected       map[int]struct{}
 	inputFields    []textinput.Model
@@ -35,7 +31,7 @@ type model struct {
 	highlightIndex int
 }
 
-func initialModel() model {
+func initialModel(argstimeblocks []models.Timeblock) model {
 	taskNameInput := textinput.New()
 	taskNameInput.Placeholder = "Task Name"
 	taskNameInput.CharLimit = 50
@@ -51,15 +47,21 @@ func initialModel() model {
 	shutdownInput := textinput.New()
 	shutdownInput.Placeholder = "SHUTDOWN COMPLETE"
 	shutdownInput.CharLimit = 17
-
-	return model{
-		timeblocks: []Timeblock{
+	var timeblocks []models.Timeblock
+	if argstimeblocks != nil {
+		timeblocks = argstimeblocks
+	} else {
+		timeblocks = []models.Timeblock{
 			{"Deep Work", utils.ParseTime("07:00"), utils.ParseTime("10:00")},
 			{"Email", utils.ParseTime("10:00"), utils.ParseTime("10:30")},
 			{"Other Work", utils.ParseTime("10:30"), utils.ParseTime("12:00")},
 			{"Meeting", utils.ParseTime("12:00"), utils.ParseTime("14:00")},
 			{"Deep Work", utils.ParseTime("14:00"), utils.ParseTime("16:00")},
-		},
+		}
+	}
+
+	return model{
+		timeblocks:    timeblocks,
 		selected:      make(map[int]struct{}),
 		adding:        false,
 		editing:       false,
@@ -97,7 +99,7 @@ func (m *model) saveAdd() {
 	end := m.inputFields[2].Value()
 
 	if name != "" && utils.IsValidTime(start) && utils.IsValidTime(end) {
-		m.timeblocks = append(m.timeblocks, Timeblock{task: name, starttime: utils.ParseTime(start), endtime: utils.ParseTime(end)})
+		m.timeblocks = append(m.timeblocks, models.Timeblock{Task: name, Starttime: utils.ParseTime(start), Endtime: utils.ParseTime(end)})
 		m.adding = false
 		m.clearInputFields()
 	}
@@ -117,9 +119,9 @@ func (m *model) enterEditMode() {
 	m.editIndex = m.cursor
 
 	timeblock := m.timeblocks[m.editIndex]
-	m.inputFields[0].SetValue(timeblock.task)
-	m.inputFields[1].SetValue(timeblock.starttime.Format("15:04"))
-	m.inputFields[2].SetValue(timeblock.endtime.Format("15:04"))
+	m.inputFields[0].SetValue(timeblock.Task)
+	m.inputFields[1].SetValue(timeblock.Starttime.Format("15:04"))
+	m.inputFields[2].SetValue(timeblock.Endtime.Format("15:04"))
 }
 
 func (m *model) saveEdit() {
@@ -127,9 +129,9 @@ func (m *model) saveEdit() {
 		return
 	}
 
-	m.timeblocks[m.editIndex].task = m.inputFields[0].Value()
-	m.timeblocks[m.editIndex].starttime, _ = time.Parse("15:04", m.inputFields[1].Value())
-	m.timeblocks[m.editIndex].endtime, _ = time.Parse("15:04", m.inputFields[2].Value())
+	m.timeblocks[m.editIndex].Task = m.inputFields[0].Value()
+	m.timeblocks[m.editIndex].Starttime, _ = time.Parse("15:04", m.inputFields[1].Value())
+	m.timeblocks[m.editIndex].Endtime, _ = time.Parse("15:04", m.inputFields[2].Value())
 
 	m.editing = false
 	m.editIndex = -1
@@ -167,7 +169,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.highlightIndex = -1
 
 		for i, tb := range m.timeblocks {
-			if now.After(tb.starttime) && now.Before(tb.endtime) {
+			if now.After(tb.Starttime) && now.Before(tb.Endtime) {
 				m.highlightIndex = i
 				break
 			}
@@ -289,7 +291,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	sort.Slice(m.timeblocks, func(i, j int) bool {
-		return m.timeblocks[i].starttime.Before(m.timeblocks[j].starttime)
+		return m.timeblocks[i].Starttime.Before(m.timeblocks[j].Starttime)
 	})
 
 	return m, nil
@@ -299,7 +301,7 @@ func (m model) View() string {
 	var b strings.Builder
 
 	for i, timeblock := range m.timeblocks {
-		duration := timeblock.endtime.Sub(timeblock.starttime).Minutes()
+		duration := timeblock.Endtime.Sub(timeblock.Starttime).Minutes()
 		lines := int(duration / 30)
 
 		var styleToUse lipgloss.Style
@@ -312,9 +314,9 @@ func (m model) View() string {
 		}
 		var blockView *strings.Builder = &strings.Builder{}
 		blockView.WriteString(styleToUse.Render(fmt.Sprintf("%s-%s",
-			timeblock.starttime.Format("15:04"), timeblock.endtime.Format("15:04"))))
+			timeblock.Starttime.Format("15:04"), timeblock.Endtime.Format("15:04"))))
 		blockView.WriteString("\n")
-		blockView.WriteString(styleToUse.Render(timeblock.task))
+		blockView.WriteString(styleToUse.Render(timeblock.Task))
 		blockText := blockView.String()
 
 		for j := 0; j < lines-1; j++ {
@@ -366,7 +368,13 @@ func (m model) View() string {
 }
 
 func main() {
-	p := tea.NewProgram(initialModel())
+	timeblocks, err := cmd.ParseArgs()
+	if err != nil {
+		fmt.Printf("Error parsing blocks: %v\n", err)
+		os.Exit(1)
+	}
+
+	p := tea.NewProgram(initialModel(timeblocks))
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Alas, there's been an error: %v", err)
 		os.Exit(1)
