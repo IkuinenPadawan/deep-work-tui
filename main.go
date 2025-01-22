@@ -166,10 +166,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case time.Time:
 		now := msg
-		m.highlightIndex = -1
 
 		for i, tb := range m.timeblocks {
-			if now.After(tb.Starttime) && now.Before(tb.Endtime) {
+			nowHour, nowMin, _ := now.Clock()
+			startHour, startMin, _ := tb.Starttime.Clock()
+			endHour, endMin, _ := tb.Endtime.Clock()
+
+			if (nowHour > startHour || (nowHour == startHour && nowMin >= startMin)) &&
+				(nowHour < endHour || (nowHour == endHour && nowMin < endMin)) {
 				m.highlightIndex = i
 				break
 			}
@@ -267,7 +271,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
+
+		case "ctrl-a":
+			if m.cursor >= 0 && m.cursor < len(m.timeblocks) && !m.editing && !m.adding {
+				tb := &m.timeblocks[m.cursor]
+				tb.Starttime = tb.Starttime.Add(15 * time.Minute)
+				tb.Endtime = tb.Endtime.Add(15 * time.Minute)
+			}
+			return m, nil
 		}
+
 	}
 
 	if m.adding {
