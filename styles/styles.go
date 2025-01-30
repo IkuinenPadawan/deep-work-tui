@@ -8,6 +8,9 @@ var (
 	TaskStyle         = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("241"))
 	FreeTime          = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
 	SelectedTimeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
+	HighlightStyle    = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("228")).
+				Bold(true)
 )
 
 func GetSeamlessBlockStyle(isFirst, isLast bool) lipgloss.Style {

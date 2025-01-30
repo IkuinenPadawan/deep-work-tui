@@ -1,6 +1,8 @@
 package main
 
 import (
+	"deep-work-tui/cmd"
+	"deep-work-tui/models"
 	"deep-work-tui/styles"
 	"deep-work-tui/utils"
 	"fmt"
@@ -13,28 +15,24 @@ import (
 	"time"
 )
 
-type Timeblock struct {
-	task      string
-	starttime time.Time
-	endtime   time.Time
-}
-
 type model struct {
-	timeblocks    []Timeblock
-	cursor        int
-	selected      map[int]struct{}
-	inputFields   []textinput.Model
-	shutdownInput []textinput.Model
-	adding        bool
-	editing       bool
-	shutdown      bool
-	editIndex     int
-	focused       int
-	err           error
-	lastKey       string
+	timeblocks     []models.Timeblock
+	cursor         int
+	selected       map[int]struct{}
+	inputFields    []textinput.Model
+	shutdownInput  []textinput.Model
+	adding         bool
+	editing        bool
+	shutdown       bool
+	editIndex      int
+	focused        int
+	err            error
+	lastKey        string
+	highlightIndex int
+	mainmode       bool
 }
 
-func initialModel() model {
+func initialModel(argstimeblocks []models.Timeblock) model {
 	taskNameInput := textinput.New()
 	taskNameInput.Placeholder = "Task Name"
 	taskNameInput.CharLimit = 50
@@ -50,15 +48,21 @@ func initialModel() model {
 	shutdownInput := textinput.New()
 	shutdownInput.Placeholder = "SHUTDOWN COMPLETE"
 	shutdownInput.CharLimit = 17
-
-	return model{
-		timeblocks: []Timeblock{
+	var timeblocks []models.Timeblock
+	if argstimeblocks != nil {
+		timeblocks = argstimeblocks
+	} else {
+		timeblocks = []models.Timeblock{
 			{"Deep Work", utils.ParseTime("07:00"), utils.ParseTime("10:00")},
 			{"Email", utils.ParseTime("10:00"), utils.ParseTime("10:30")},
 			{"Other Work", utils.ParseTime("10:30"), utils.ParseTime("12:00")},
 			{"Meeting", utils.ParseTime("12:00"), utils.ParseTime("14:00")},
 			{"Deep Work", utils.ParseTime("14:00"), utils.ParseTime("16:00")},
-		},
+		}
+	}
+
+	return model{
+		timeblocks:    timeblocks,
 		selected:      make(map[int]struct{}),
 		adding:        false,
 		editing:       false,
@@ -66,11 +70,17 @@ func initialModel() model {
 		focused:       0,
 		shutdown:      false,
 		shutdownInput: []textinput.Model{shutdownInput},
+		mainmode:      true,
 	}
 }
 
 func (m model) Init() tea.Cmd {
-	return textinput.Blink
+	return tea.Batch(textinput.Blink, tick())
+}
+func tick() tea.Cmd {
+	return tea.Tick(time.Minute, func(t time.Time) tea.Msg {
+		return t
+	})
 }
 
 func (m *model) enterAddMode() {
@@ -91,7 +101,7 @@ func (m *model) saveAdd() {
 	end := m.inputFields[2].Value()
 
 	if name != "" && utils.IsValidTime(start) && utils.IsValidTime(end) {
-		m.timeblocks = append(m.timeblocks, Timeblock{task: name, starttime: utils.ParseTime(start), endtime: utils.ParseTime(end)})
+		m.timeblocks = append(m.timeblocks, models.Timeblock{Task: name, Starttime: utils.ParseTime(start), Endtime: utils.ParseTime(end)})
 		m.adding = false
 		m.clearInputFields()
 	}
@@ -111,9 +121,9 @@ func (m *model) enterEditMode() {
 	m.editIndex = m.cursor
 
 	timeblock := m.timeblocks[m.editIndex]
-	m.inputFields[0].SetValue(timeblock.task)
-	m.inputFields[1].SetValue(timeblock.starttime.Format("15:04"))
-	m.inputFields[2].SetValue(timeblock.endtime.Format("15:04"))
+	m.inputFields[0].SetValue(timeblock.Task)
+	m.inputFields[1].SetValue(timeblock.Starttime.Format("15:04"))
+	m.inputFields[2].SetValue(timeblock.Endtime.Format("15:04"))
 }
 
 func (m *model) saveEdit() {
@@ -121,9 +131,9 @@ func (m *model) saveEdit() {
 		return
 	}
 
-	m.timeblocks[m.editIndex].task = m.inputFields[0].Value()
-	m.timeblocks[m.editIndex].starttime, _ = time.Parse("15:04", m.inputFields[1].Value())
-	m.timeblocks[m.editIndex].endtime, _ = time.Parse("15:04", m.inputFields[2].Value())
+	m.timeblocks[m.editIndex].Task = m.inputFields[0].Value()
+	m.timeblocks[m.editIndex].Starttime, _ = time.Parse("15:04", m.inputFields[1].Value())
+	m.timeblocks[m.editIndex].Endtime, _ = time.Parse("15:04", m.inputFields[2].Value())
 
 	m.editing = false
 	m.editIndex = -1
@@ -154,19 +164,29 @@ func (m *model) clearInputFields() {
 	}
 }
 
+func (m *model) toggleMainMode() {
+	m.mainmode = !m.mainmode
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case time.Time:
+		now := msg
+
+		for i, tb := range m.timeblocks {
+			nowHour, nowMin, _ := now.Clock()
+			startHour, startMin, _ := tb.Starttime.Clock()
+			endHour, endMin, _ := tb.Endtime.Clock()
+
+			if (nowHour > startHour || (nowHour == startHour && nowMin >= startMin)) &&
+				(nowHour < endHour || (nowHour == endHour && nowMin < endMin)) {
+				m.highlightIndex = i
+				break
+			}
+		}
+		return m, tick()
 
 	case tea.KeyMsg:
-		if msg.String() == "d" && m.lastKey == "d" && !m.editing && !m.adding {
-			indexToRemove := m.cursor
-			m.timeblocks = append(m.timeblocks[:indexToRemove], m.timeblocks[indexToRemove+1:]...)
-			m.lastKey = ""
-			return m, nil
-		}
-
-		// Store the current key as the last key
-		m.lastKey = msg.String()
 		switch msg.String() {
 
 		case "ctrl+c":
@@ -186,26 +206,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cancelShutdown()
 			} else if m.adding {
 				m.cancelAdd()
+			} else if !m.mainmode {
+				m.toggleMainMode()
 			}
 
 		case "up", "k":
-			if m.cursor > 0 && !m.editing && !m.adding && !m.shutdown {
+			if m.cursor > 0 && !m.editing && !m.adding && !m.shutdown && !m.mainmode {
 				m.cursor--
 			}
 
 		case "down", "j":
-			if m.cursor < len(m.timeblocks)-1 && !m.editing && !m.adding && !m.shutdown {
+			if m.cursor < len(m.timeblocks)-1 && !m.editing && !m.adding && !m.shutdown && !m.mainmode {
 				m.cursor++
 			}
 
 		case "a":
-			if !m.editing && !m.shutdown && !m.adding {
+			if !m.editing && !m.shutdown && !m.adding && !m.mainmode {
 				m.enterAddMode()
 				return m, nil
 			}
 
 		case "e":
-			if !m.adding && !m.shutdown && !m.editing {
+			if !m.adding && !m.shutdown && !m.editing && !m.mainmode {
 				m.enterEditMode()
 				return m, nil
 			}
@@ -215,6 +237,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.enterShutdownMode()
 				return m, nil
 			}
+
+		case "d":
+			if m.lastKey == "d" && !m.editing && !m.adding {
+				// Remove the timeblock at the current cursor position
+				if m.cursor >= 0 && m.cursor < len(m.timeblocks) {
+					indexToRemove := m.cursor
+					m.timeblocks = append(m.timeblocks[:indexToRemove], m.timeblocks[indexToRemove+1:]...)
+
+					// Adjust cursor if necessary
+					if m.cursor >= len(m.timeblocks) {
+						m.cursor = len(m.timeblocks) - 1
+					}
+				}
+				m.lastKey = "" // Reset the last key
+				return m, nil
+			}
+			m.lastKey = "d" // Store this key as the last pressed
 
 		case "enter":
 			if m.adding && m.editing == false {
@@ -240,6 +279,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
+
+		case "ctrl-a":
+			if m.cursor >= 0 && m.cursor < len(m.timeblocks) && !m.editing && !m.adding {
+				tb := &m.timeblocks[m.cursor]
+				tb.Starttime = tb.Starttime.Add(15 * time.Minute)
+				tb.Endtime = tb.Endtime.Add(15 * time.Minute)
+			}
+			return m, nil
+
+		case "i":
+			if m.mainmode {
+				m.toggleMainMode()
+			}
 		}
 	}
 
@@ -264,7 +316,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	sort.Slice(m.timeblocks, func(i, j int) bool {
-		return m.timeblocks[i].starttime.Before(m.timeblocks[j].starttime)
+		return m.timeblocks[i].Starttime.Before(m.timeblocks[j].Starttime)
 	})
 
 	return m, nil
@@ -274,21 +326,22 @@ func (m model) View() string {
 	var b strings.Builder
 
 	for i, timeblock := range m.timeblocks {
-		duration := timeblock.endtime.Sub(timeblock.starttime).Minutes()
+		duration := timeblock.Endtime.Sub(timeblock.Starttime).Minutes()
 		lines := int(duration / 30)
 
 		var styleToUse lipgloss.Style
-		if m.cursor == i {
+		if m.cursor == i && !m.mainmode {
 			styleToUse = styles.SelectedTimeStyle
+		} else if m.highlightIndex == i {
+			styleToUse = styles.HighlightStyle
 		} else {
 			styleToUse = styles.TimeStyle
 		}
-
 		var blockView *strings.Builder = &strings.Builder{}
 		blockView.WriteString(styleToUse.Render(fmt.Sprintf("%s-%s",
-			timeblock.starttime.Format("15:04"), timeblock.endtime.Format("15:04"))))
+			timeblock.Starttime.Format("15:04"), timeblock.Endtime.Format("15:04"))))
 		blockView.WriteString("\n")
-		blockView.WriteString(styleToUse.Render(timeblock.task))
+		blockView.WriteString(styleToUse.Render(timeblock.Task))
 		blockText := blockView.String()
 
 		for j := 0; j < lines-1; j++ {
@@ -326,8 +379,10 @@ func (m model) View() string {
 		b.WriteString("\n [ tab: Cycle Focus | enter: Save | esc: Cancel ]")
 	}
 
-	if !m.adding && !m.editing && !m.shutdown {
-		b.WriteString("\n [ a: Add new time block | e: Edit time block | dd: Delete time block | j: Down | k: Up | s: shutdown ]")
+	if !m.adding && !m.editing && !m.shutdown && !m.mainmode {
+		b.WriteString("\n [ a: Add new time block | e: Edit time block | dd: Delete time block | j: Down | k: Up | s: shutdown \n   esc: back to main view ]")
+	} else {
+		b.WriteString("\n [ i: editmode ]")
 	}
 
 	if m.shutdown {
@@ -340,7 +395,13 @@ func (m model) View() string {
 }
 
 func main() {
-	p := tea.NewProgram(initialModel())
+	timeblocks, err := cmd.ParseArgs()
+	if err != nil {
+		fmt.Printf("Error parsing blocks: %v\n", err)
+		os.Exit(1)
+	}
+
+	p := tea.NewProgram(initialModel(timeblocks))
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Alas, there's been an error: %v", err)
 		os.Exit(1)
