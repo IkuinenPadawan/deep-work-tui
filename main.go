@@ -29,6 +29,7 @@ type model struct {
 	err            error
 	lastKey        string
 	highlightIndex int
+	mainmode       bool
 }
 
 func initialModel(argstimeblocks []models.Timeblock) model {
@@ -69,6 +70,7 @@ func initialModel(argstimeblocks []models.Timeblock) model {
 		focused:       0,
 		shutdown:      false,
 		shutdownInput: []textinput.Model{shutdownInput},
+		mainmode:      true,
 	}
 }
 
@@ -162,6 +164,10 @@ func (m *model) clearInputFields() {
 	}
 }
 
+func (m *model) toggleMainMode() {
+	m.mainmode = !m.mainmode
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case time.Time:
@@ -200,26 +206,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cancelShutdown()
 			} else if m.adding {
 				m.cancelAdd()
+			} else if !m.mainmode {
+				m.toggleMainMode()
 			}
 
 		case "up", "k":
-			if m.cursor > 0 && !m.editing && !m.adding && !m.shutdown {
+			if m.cursor > 0 && !m.editing && !m.adding && !m.shutdown && !m.mainmode {
 				m.cursor--
 			}
 
 		case "down", "j":
-			if m.cursor < len(m.timeblocks)-1 && !m.editing && !m.adding && !m.shutdown {
+			if m.cursor < len(m.timeblocks)-1 && !m.editing && !m.adding && !m.shutdown && !m.mainmode {
 				m.cursor++
 			}
 
 		case "a":
-			if !m.editing && !m.shutdown && !m.adding {
+			if !m.editing && !m.shutdown && !m.adding && !m.mainmode {
 				m.enterAddMode()
 				return m, nil
 			}
 
 		case "e":
-			if !m.adding && !m.shutdown && !m.editing {
+			if !m.adding && !m.shutdown && !m.editing && !m.mainmode {
 				m.enterEditMode()
 				return m, nil
 			}
@@ -279,8 +287,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				tb.Endtime = tb.Endtime.Add(15 * time.Minute)
 			}
 			return m, nil
-		}
 
+		case "i":
+			if m.mainmode {
+				m.toggleMainMode()
+			}
+		}
 	}
 
 	if m.adding {
@@ -318,7 +330,7 @@ func (m model) View() string {
 		lines := int(duration / 30)
 
 		var styleToUse lipgloss.Style
-		if m.cursor == i {
+		if m.cursor == i && !m.mainmode {
 			styleToUse = styles.SelectedTimeStyle
 		} else if m.highlightIndex == i {
 			styleToUse = styles.HighlightStyle
@@ -367,8 +379,10 @@ func (m model) View() string {
 		b.WriteString("\n [ tab: Cycle Focus | enter: Save | esc: Cancel ]")
 	}
 
-	if !m.adding && !m.editing && !m.shutdown {
-		b.WriteString("\n [ a: Add new time block | e: Edit time block | dd: Delete time block | j: Down | k: Up | s: shutdown ]")
+	if !m.adding && !m.editing && !m.shutdown && !m.mainmode {
+		b.WriteString("\n [ a: Add new time block | e: Edit time block | dd: Delete time block | j: Down | k: Up | s: shutdown \n   esc: back to main view ]")
+	} else {
+		b.WriteString("\n [ i: editmode ]")
 	}
 
 	if m.shutdown {
