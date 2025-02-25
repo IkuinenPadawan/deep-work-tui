@@ -15,6 +15,10 @@ import (
 	"time"
 )
 
+type shutdownMsg struct {
+	elapsedTime time.Duration
+}
+
 type model struct {
 	timeblocks     []models.Timeblock
 	cursor         int
@@ -32,6 +36,7 @@ type model struct {
 	mainmode       bool
 	adjustingStart bool
 	adjustingEnd   bool
+	startTime      time.Time
 }
 
 func initialModel(argstimeblocks []models.Timeblock) model {
@@ -75,6 +80,7 @@ func initialModel(argstimeblocks []models.Timeblock) model {
 		mainmode:       true,
 		adjustingStart: false,
 		adjustingEnd:   false,
+		startTime:      time.Now(),
 	}
 }
 
@@ -85,6 +91,14 @@ func tick() tea.Cmd {
 	return tea.Tick(time.Minute, func(t time.Time) tea.Msg {
 		return t
 	})
+}
+
+func quitWithTimer(startTime time.Time) tea.Cmd {
+	return func() tea.Msg {
+		return shutdownMsg{
+			elapsedTime: time.Since(startTime),
+		}
+	}
 }
 
 func (m *model) enterAddMode() {
@@ -187,6 +201,9 @@ func (m *model) stopAdjusting() {
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case shutdownMsg:
+		return m, tea.Quit
+
 	case time.Time:
 		now := msg
 
@@ -207,13 +224,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 
 		case "ctrl+c":
-			return m, tea.Quit
+			return m, quitWithTimer(m.startTime)
 
 		case "q":
 			if m.adding {
 				m.cancelAdd()
 			} else {
-				return m, tea.Quit
+				return m, quitWithTimer(m.startTime)
 			}
 
 		case "esc":
@@ -485,9 +502,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	startTime := time.Now()
+
 	p := tea.NewProgram(initialModel(timeblocks))
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Alas, there's been an error: %v", err)
 		os.Exit(1)
 	}
+	elapsedTime := time.Since(startTime)
+	fmt.Printf("Work day time: %s\n", elapsedTime.Round(time.Second))
 }
