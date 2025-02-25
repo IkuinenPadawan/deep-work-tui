@@ -30,6 +30,8 @@ type model struct {
 	lastKey        string
 	highlightIndex int
 	mainmode       bool
+	adjustingStart bool
+	adjustingEnd   bool
 }
 
 func initialModel(argstimeblocks []models.Timeblock) model {
@@ -62,15 +64,17 @@ func initialModel(argstimeblocks []models.Timeblock) model {
 	}
 
 	return model{
-		timeblocks:    timeblocks,
-		selected:      make(map[int]struct{}),
-		adding:        false,
-		editing:       false,
-		inputFields:   []textinput.Model{taskNameInput, startTimeInput, endTimeInput},
-		focused:       0,
-		shutdown:      false,
-		shutdownInput: []textinput.Model{shutdownInput},
-		mainmode:      true,
+		timeblocks:     timeblocks,
+		selected:       make(map[int]struct{}),
+		adding:         false,
+		editing:        false,
+		inputFields:    []textinput.Model{taskNameInput, startTimeInput, endTimeInput},
+		focused:        0,
+		shutdown:       false,
+		shutdownInput:  []textinput.Model{shutdownInput},
+		mainmode:       true,
+		adjustingStart: false,
+		adjustingEnd:   false,
 	}
 }
 
@@ -168,6 +172,19 @@ func (m *model) toggleMainMode() {
 	m.mainmode = !m.mainmode
 }
 
+func (m *model) startAdjustingStart() {
+	m.adjustingStart = true
+	m.adjustingEnd = false
+}
+func (m *model) startAdjustingEnd() {
+	m.adjustingEnd = true
+	m.adjustingStart = false
+}
+func (m *model) stopAdjusting() {
+	m.adjustingStart = false
+	m.adjustingEnd = false
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case time.Time:
@@ -206,6 +223,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cancelShutdown()
 			} else if m.adding {
 				m.cancelAdd()
+			} else if m.adjustingStart || m.adjustingEnd {
+				m.stopAdjusting()
 			} else if !m.mainmode {
 				m.toggleMainMode()
 			}
@@ -264,6 +283,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			} else if m.shutdown == true {
 				return m, tea.Quit
+			} else if m.adjustingStart || m.adjustingEnd {
+				m.stopAdjusting()
+				return m, nil
 			} else {
 				m.err = fmt.Errorf("invalid input")
 			}
@@ -280,11 +302,57 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case "ctrl-a":
+		case "l":
+			if !m.adding && !m.editing && !m.shutdown && !m.adjustingStart {
+				if m.adjustingEnd {
+					m.stopAdjusting()
+				} else {
+					m.startAdjustingEnd()
+				}
+				return m, nil
+			}
+
+		case "h":
+			if !m.adding && !m.editing && !m.shutdown && !m.adjustingEnd {
+				if m.adjustingStart {
+					m.stopAdjusting()
+				} else {
+					m.startAdjustingStart()
+				}
+				return m, nil
+			}
+
+		case "ctrl+a", "+":
 			if m.cursor >= 0 && m.cursor < len(m.timeblocks) && !m.editing && !m.adding {
 				tb := &m.timeblocks[m.cursor]
-				tb.Starttime = tb.Starttime.Add(15 * time.Minute)
-				tb.Endtime = tb.Endtime.Add(15 * time.Minute)
+				if m.adjustingStart {
+					newStartTime := tb.Starttime.Add(15 * time.Minute)
+					if newStartTime.Before(tb.Endtime) {
+						tb.Starttime = newStartTime
+					}
+				} else if m.adjustingEnd {
+					tb.Endtime = tb.Endtime.Add(15 * time.Minute)
+				} else {
+					tb.Starttime = tb.Starttime.Add(15 * time.Minute)
+					tb.Endtime = tb.Endtime.Add(15 * time.Minute)
+				}
+			}
+			return m, nil
+
+		case "ctrl+z", "-":
+			if m.cursor >= 0 && m.cursor < len(m.timeblocks) && !m.editing && !m.adding {
+				tb := &m.timeblocks[m.cursor]
+				if m.adjustingStart {
+					tb.Starttime = tb.Starttime.Add(-15 * time.Minute)
+				} else if m.adjustingEnd {
+					newEndTime := tb.Endtime.Add(-15 * time.Minute)
+					if newEndTime.After(tb.Starttime) {
+						tb.Endtime = newEndTime
+					}
+				} else {
+					tb.Starttime = tb.Starttime.Add(-15 * time.Minute)
+					tb.Endtime = tb.Endtime.Add(-15 * time.Minute)
+				}
 			}
 			return m, nil
 
@@ -338,8 +406,17 @@ func (m model) View() string {
 			styleToUse = styles.TimeStyle
 		}
 		var blockView *strings.Builder = &strings.Builder{}
-		blockView.WriteString(styleToUse.Render(fmt.Sprintf("%s-%s",
-			timeblock.Starttime.Format("15:04"), timeblock.Endtime.Format("15:04"))))
+
+		if m.cursor == i && m.adjustingStart {
+			blockView.WriteString(styles.HighlightStyle.Render(timeblock.Starttime.Format("15:04")))
+			blockView.WriteString(styleToUse.Render("-" + timeblock.Endtime.Format("15:04")))
+		} else if m.cursor == i && m.adjustingEnd {
+			blockView.WriteString(styleToUse.Render(timeblock.Starttime.Format("15:04") + "-"))
+			blockView.WriteString(styles.HighlightStyle.Render(timeblock.Endtime.Format("15:04")))
+		} else {
+			blockView.WriteString(styleToUse.Render(fmt.Sprintf("%s-%s",
+				timeblock.Starttime.Format("15:04"), timeblock.Endtime.Format("15:04"))))
+		}
 		blockView.WriteString("\n")
 		blockView.WriteString(styleToUse.Render(timeblock.Task))
 		blockText := blockView.String()
@@ -379,8 +456,15 @@ func (m model) View() string {
 		b.WriteString("\n [ tab: Cycle Focus | enter: Save | esc: Cancel ]")
 	}
 
-	if !m.adding && !m.editing && !m.shutdown && !m.mainmode {
-		b.WriteString("\n [ a: Add new time block | e: Edit time block | dd: Delete time block | j: Down | k: Up | s: shutdown \n   esc: back to main view ]")
+	if m.adjustingStart {
+		b.WriteString("\n [ START TIME ADJUSTMENT MODE ]")
+		b.WriteString("\n [ +/ctrl+a: Add 15min | -/ctrl+z: Subtract 15min | enter/esc: Exit mode ]")
+	} else if m.adjustingEnd {
+		b.WriteString("\n [ END TIME ADJUSTMENT MODE ]")
+		b.WriteString("\n [ +/ctrl+a: Add 15min | -/ctrl+z: Subtract 15min | enter/esc: Exit mode ]")
+	} else if !m.adding && !m.editing && !m.shutdown && !m.mainmode {
+		b.WriteString("\n [ a: Add new block | e: Edit block | dd: Delete block | j: Down | k: Up | s: shutdown")
+		b.WriteString("\n   h: Adjust start time | l: Adjust end time | +/-: Add/subtract 15min | esc: back to main view ]")
 	} else {
 		b.WriteString("\n [ i: editmode ]")
 	}
