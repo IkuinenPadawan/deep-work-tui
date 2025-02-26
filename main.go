@@ -3,6 +3,7 @@ package main
 import (
 	"deep-work-tui/cmd"
 	"deep-work-tui/models"
+	"deep-work-tui/service"
 	"deep-work-tui/styles"
 	"deep-work-tui/utils"
 	"fmt"
@@ -14,6 +15,12 @@ import (
 	"strings"
 	"time"
 )
+
+var shouldSaveDayRecords bool
+
+type shutdownMsg struct {
+	elapsedTime time.Duration
+}
 
 type model struct {
 	timeblocks     []models.Timeblock
@@ -32,6 +39,7 @@ type model struct {
 	mainmode       bool
 	adjustingStart bool
 	adjustingEnd   bool
+	startTime      time.Time
 }
 
 func initialModel(argstimeblocks []models.Timeblock) model {
@@ -75,6 +83,7 @@ func initialModel(argstimeblocks []models.Timeblock) model {
 		mainmode:       true,
 		adjustingStart: false,
 		adjustingEnd:   false,
+		startTime:      time.Now(),
 	}
 }
 
@@ -85,6 +94,14 @@ func tick() tea.Cmd {
 	return tea.Tick(time.Minute, func(t time.Time) tea.Msg {
 		return t
 	})
+}
+
+func quitWithTimer(startTime time.Time) tea.Cmd {
+	return func() tea.Msg {
+		return shutdownMsg{
+			elapsedTime: time.Since(startTime),
+		}
+	}
 }
 
 func (m *model) enterAddMode() {
@@ -187,6 +204,16 @@ func (m *model) stopAdjusting() {
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case shutdownMsg:
+		if shouldSaveDayRecords {
+			err := storage.SaveDayRecord(m.timeblocks, m.startTime)
+			if err != nil {
+				m.err = fmt.Errorf("Error saving data: %v", err)
+				return m, nil
+			}
+		}
+		return m, tea.Quit
+
 	case time.Time:
 		now := msg
 
@@ -207,13 +234,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 
 		case "ctrl+c":
-			return m, tea.Quit
+			return m, quitWithTimer(m.startTime)
 
 		case "q":
 			if m.adding {
 				m.cancelAdd()
 			} else {
-				return m, tea.Quit
+				return m, quitWithTimer(m.startTime)
 			}
 
 		case "esc":
@@ -479,15 +506,20 @@ func (m model) View() string {
 }
 
 func main() {
-	timeblocks, err := cmd.ParseArgs()
+	timeblocks, shouldSave, err := cmd.ParseArgs()
 	if err != nil {
 		fmt.Printf("Error parsing blocks: %v\n", err)
 		os.Exit(1)
 	}
+
+	startTime := time.Now()
+	shouldSaveDayRecords = shouldSave
 
 	p := tea.NewProgram(initialModel(timeblocks))
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Alas, there's been an error: %v", err)
 		os.Exit(1)
 	}
+	elapsedTime := time.Since(startTime)
+	fmt.Printf("Work day time: %s\n", elapsedTime.Round(time.Second))
 }
