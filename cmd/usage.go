@@ -15,9 +15,12 @@ Options:
       Provide time blocks separated by semicolons (;) where each block has:
       - START and END in the format HH:MM
       - TASK is the description of the activity
+  --save
+      Save day's timeblock data to default location (./records/YYYY-MM-DD.json)
 
 Example:
   --blocks "07:00-09:00 Deep Work;09:00-09:30 Emails"
+  --blocks "07:00-09:00 Deep Work;" --save
 
 Help:
   Use this program to schedule and visualize timeblocks.

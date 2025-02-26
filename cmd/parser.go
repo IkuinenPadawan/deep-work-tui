@@ -8,19 +8,20 @@ import (
 	"strings"
 )
 
-func ParseArgs() ([]models.Timeblock, error) {
+func ParseArgs() ([]models.Timeblock, bool, error) {
 	blocksArg := flag.String("blocks", "", "Time blocks in the format 'START-END TASK'")
-
+	saveArg := flag.Bool("save", false, "Save timeblocks to the default location")
 	flag.Usage = CustomUsage
 
 	flag.Parse()
 
 	if *blocksArg == "" {
-		return nil, nil
+		return nil, *saveArg, nil
 	}
 
 	blockArgs := strings.Split(*blocksArg, ";")
-	return ParseBlocks(blockArgs)
+	timeblocks, err := ParseBlocks(blockArgs)
+	return timeblocks, *saveArg, err
 }
 
 func ParseBlocks(blockArgs []string) ([]models.Timeblock, error) {

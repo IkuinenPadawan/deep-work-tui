@@ -3,6 +3,7 @@ package main
 import (
 	"deep-work-tui/cmd"
 	"deep-work-tui/models"
+	"deep-work-tui/service"
 	"deep-work-tui/styles"
 	"deep-work-tui/utils"
 	"fmt"
@@ -14,6 +15,8 @@ import (
 	"strings"
 	"time"
 )
+
+var shouldSaveDayRecords bool
 
 type shutdownMsg struct {
 	elapsedTime time.Duration
@@ -202,6 +205,13 @@ func (m *model) stopAdjusting() {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case shutdownMsg:
+		if shouldSaveDayRecords {
+			err := storage.SaveDayRecord(m.timeblocks, m.startTime)
+			if err != nil {
+				m.err = fmt.Errorf("Error saving data: %v", err)
+				return m, nil
+			}
+		}
 		return m, tea.Quit
 
 	case time.Time:
@@ -496,13 +506,14 @@ func (m model) View() string {
 }
 
 func main() {
-	timeblocks, err := cmd.ParseArgs()
+	timeblocks, shouldSave, err := cmd.ParseArgs()
 	if err != nil {
 		fmt.Printf("Error parsing blocks: %v\n", err)
 		os.Exit(1)
 	}
 
 	startTime := time.Now()
+	shouldSaveDayRecords = shouldSave
 
 	p := tea.NewProgram(initialModel(timeblocks))
 	if _, err := p.Run(); err != nil {
